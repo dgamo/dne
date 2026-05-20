@@ -22,9 +22,14 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.0.2
+      # Build golangci-lint from source so it uses the same Go toolchain
+      # as the code under lint. The action ships prebuilt binaries that
+      # may be built with an older Go than our go.mod targets, which
+      # causes lint to refuse to run.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.0.2
+      - name: Run golangci-lint
+        run: golangci-lint run
 
   go-test:
     name: Test Go
