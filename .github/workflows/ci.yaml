@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.3"
+
+jobs:
+  go-lint:
+    name: Lint Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.0.0
+          args: --timeout 5m
+
+  go-test:
+    name: Test Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install setup-envtest
+        run: |
+          mkdir -p bin
+          GOBIN="$(pwd)/bin" go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24
+      - name: Run tests with coverage and race detector
+        run: |
+          export KUBEBUILDER_ASSETS="$(./bin/setup-envtest use 1.32.0 -p path)"
+          go test ./... -race -count=1 -coverprofile=coverage.out -timeout=240s
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+      - name: Sync chart files
+        run: make helm-sync
+      - name: Verify chart-bundled files match sources
+        run: |
+          git diff --exit-code -- deploy/helm/dne/files/ || \
+            (echo "ERROR: deploy/helm/dne/files/ drifted from deploy/grafana/ + deploy/prometheus/. Run 'make helm-sync' and commit." && exit 1)
+      - name: helm lint
+        run: helm lint deploy/helm/dne
+      - name: helm template (defaults)
+        run: helm template dne deploy/helm/dne
+      - name: helm template (namespaces)
+        run: helm template dne deploy/helm/dne --set 'namespaces={kube-system,default}'
+      - name: helm template (label-selector)
+        run: helm template dne deploy/helm/dne --set 'labelSelector=dne.k8s.io/watch=true'
+      - name: helm template (all observability gates)
+        run: |
+          helm template dne deploy/helm/dne \
+            --set serviceMonitor.enabled=true \
+            --set prometheusRule.enabled=true \
+            --set grafanaDashboard.enabled=true
+
+  docker:
+    name: Build container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          tags: dne:ci
