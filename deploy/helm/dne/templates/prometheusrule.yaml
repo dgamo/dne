@@ -1,0 +1,88 @@
+{{- if .Values.prometheusRule.enabled }}
+{{- $warn := int .Values.prometheusRule.thresholds.warning }}
+{{- $crit := int .Values.prometheusRule.thresholds.critical }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "dne.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dne.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: dne.certificates
+      rules:
+        - alert: DNECertificateExpiringSoon
+          expr: |
+            (dne_certificate_not_after_seconds - time()) < ({{ $warn }} * 24 * 3600)
+            and (dne_certificate_not_after_seconds - time()) > ({{ $crit }} * 24 * 3600)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate in {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} expires soon"
+            description: |
+              Certificate at key={{ "{{" }} $labels.key {{ "}}" }} index={{ "{{" }} $labels.cert_index {{ "}}" }}
+              in Secret {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} expires in less than {{ $warn }} days.
+
+        - alert: DNECertificateExpiringCritical
+          expr: |
+            (dne_certificate_not_after_seconds - time()) < ({{ $crit }} * 24 * 3600)
+            and (dne_certificate_not_after_seconds - time()) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate in {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} expires within {{ $crit }} days"
+            description: |
+              Certificate at key={{ "{{" }} $labels.key {{ "}}" }} index={{ "{{" }} $labels.cert_index {{ "}}" }}
+              in Secret {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} expires in less than {{ $crit }} days.
+
+        - alert: DNECertificateExpired
+          expr: (dne_certificate_not_after_seconds - time()) < 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate in {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} has expired"
+            description: |
+              Certificate at key={{ "{{" }} $labels.key {{ "}}" }} index={{ "{{" }} $labels.cert_index {{ "}}" }}
+              in Secret {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} expired.
+
+        - alert: DNECertificateNotYetValid
+          expr: (dne_certificate_not_before_seconds - time()) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate in {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} is not yet valid"
+            description: |
+              Certificate at key={{ "{{" }} $labels.key {{ "}}" }} index={{ "{{" }} $labels.cert_index {{ "}}" }}
+              has NotBefore in the future. Usually indicates clock skew or a misissued certificate.
+
+    - name: dne.operations
+      rules:
+        - alert: DNEControllerDown
+          expr: up{job=~".*dne.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "dne controller is not being scraped"
+            description: |
+              No successful scrapes of dne in the last 5 minutes. Certificate expiry metrics are stale.
+
+        - alert: DNEParseErrorsRising
+          expr: sum by (namespace, secret) (rate(dne_secret_parse_errors_total[15m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "dne is failing to parse PEM blocks in {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }}"
+            description: |
+              Secret {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.secret {{ "}}" }} contains values
+              that look like PEM CERTIFICATE blocks but cannot be parsed as X.509.
+{{- end }}

@@ -1,6 +1,7 @@
-# Binaries (controller + tools installed by the Makefile)
+# Binaries — tools and the compiled controller live under bin/.
+# Don't add a bare "dne" pattern: it would also match cmd/dne/ and
+# deploy/helm/dne/ (which are real source dirs that must be tracked).
 bin/
-dne
 
 # Test and build outputs
 coverage.out

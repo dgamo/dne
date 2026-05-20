@@ -1,0 +1,50 @@
+dne (Do-Not-Expire) has been installed.
+
+Release:     {{ .Release.Name }}
+Namespace:   {{ .Release.Namespace }}
+Image:       {{ include "dne.image" . }}
+Replicas:    {{ .Values.replicaCount }}
+Scope:
+{{- if .Values.namespaces }}
+  Namespaces: {{ join ", " .Values.namespaces }}
+{{- else }}
+  Namespaces: cluster-wide
+{{- end }}
+{{- if .Values.labelSelector }}
+  Label selector: {{ .Values.labelSelector }}
+{{- else }}
+  Label selector: (none — every Secret in scope is watched)
+{{- end }}
+
+1. Inspect the metrics endpoint:
+
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "dne.fullname" . }} 8080:{{ .Values.service.port }}
+   curl http://localhost:8080/metrics | grep dne_certificate_
+
+{{- if not .Values.serviceMonitor.enabled }}
+
+2. ServiceMonitor is NOT enabled. If you run kube-prometheus-stack, enable it with:
+
+     helm upgrade {{ .Release.Name }} dne/dne --reuse-values \
+       --set serviceMonitor.enabled=true
+{{- end }}
+
+{{- if not .Values.prometheusRule.enabled }}
+
+3. PrometheusRule is NOT enabled. Enable the bundled alerting rules with:
+
+     helm upgrade {{ .Release.Name }} dne/dne --reuse-values \
+       --set prometheusRule.enabled=true
+{{- end }}
+
+{{- if not .Values.grafanaDashboard.enabled }}
+
+4. Grafana dashboard is NOT enabled. Enable the bundled dashboard ConfigMap with:
+
+     helm upgrade {{ .Release.Name }} dne/dne --reuse-values \
+       --set grafanaDashboard.enabled=true
+
+   Or import deploy/grafana/dne.json into Grafana manually.
+{{- end }}
+
+Docs: https://github.com/dgamo/dne

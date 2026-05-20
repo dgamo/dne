@@ -1,0 +1,117 @@
+# Default values for dne (Do-Not-Expire).
+# See docs/configuration.md for the full reference.
+
+image:
+  repository: ghcr.io/dgamo/dne
+  # Defaults to .Chart.AppVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Override the chart's full name (default: <release>-dne).
+nameOverride: ""
+fullnameOverride: ""
+
+# Number of controller replicas. Keep at 1 unless you also enable
+# leaderElection — multiple replicas without LE will double-publish
+# the same metric series under different `instance` labels.
+replicaCount: 1
+
+# Controller scope.
+# Empty `namespaces` (default) means cluster-wide.
+namespaces: []
+# Example: dne.k8s.io/watch=true (or any valid label-selector syntax).
+# Empty means no label filter.
+labelSelector: ""
+
+leaderElection:
+  enabled: false
+  # Name of the coordination.k8s.io/Lease used for leader election.
+  id: "dne.dgamo.github.io"
+
+# Where the metrics and health endpoints bind.
+metricsPort: 8080
+healthPort: 8081
+
+logLevel: info
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  relabelings: []
+  metricRelabelings: []
+
+prometheusRule:
+  enabled: false
+  labels: {}
+  thresholds:
+    warning: 14
+    critical: 3
+
+grafanaDashboard:
+  enabled: false
+  labels: {}
+  # Override the namespace where the dashboard ConfigMap is created.
+  # Defaults to the release namespace.
+  namespace: ""
+  # Extra annotations on the ConfigMap (e.g. folder hints for the sidecar).
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context. Defaults harden the pod for distroless.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+priorityClassName: ""
+
+# Extra args appended to the dne command line (overrides take effect
+# after the structured args derived from the values above).
+extraArgs: []
+
+# Extra environment variables.
+env: []
+# - name: GOMAXPROCS
+#   value: "1"

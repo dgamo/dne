@@ -1,0 +1,22 @@
+apiVersion: v2
+name: dne
+description: Do-Not-Expire — Prometheus metrics for every certificate stored in Kubernetes Secrets.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - certificates
+  - tls
+  - prometheus
+  - security
+  - secrets
+home: https://github.com/dgamo/dne
+sources:
+  - https://github.com/dgamo/dne
+maintainers:
+  - name: Daniel Gallardo
+    url: https://github.com/dgamo
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: security
