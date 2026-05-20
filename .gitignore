@@ -1,5 +1,11 @@
-# Binary
+# Binaries (controller + tools installed by the Makefile)
+bin/
 dne
+
+# Test and build outputs
+coverage.out
+coverage.html
+dist/
 
 # IDE
 .idea/
