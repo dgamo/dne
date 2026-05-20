@@ -1,0 +1,96 @@
+# Prometheus alerting rules for dne (Do-Not-Expire).
+#
+# This file ships standalone defaults (14d warning, 3d critical). When
+# bundled into the Helm chart, the same content is re-rendered with
+# user-supplied thresholds via .Values.prometheusRule.thresholds.
+#
+# Apply directly:
+#   kubectl apply -f deploy/prometheus/dne-rules.yaml -n monitoring
+#
+# Or install through the Helm chart with --set prometheusRule.enabled=true.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dne
+  labels:
+    app.kubernetes.io/name: dne
+    app.kubernetes.io/component: alerting-rules
+spec:
+  groups:
+    - name: dne.certificates
+      rules:
+        - alert: DNECertificateExpiringSoon
+          expr: |
+            (dne_certificate_not_after_seconds - time()) < (14 * 24 * 3600)
+            and (dne_certificate_not_after_seconds - time()) > (3 * 24 * 3600)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate in {{ $labels.namespace }}/{{ $labels.secret }} expires soon"
+            description: |
+              Certificate at key={{ $labels.key }} index={{ $labels.cert_index }}
+              in Secret {{ $labels.namespace }}/{{ $labels.secret }} expires in less than 14 days.
+              Subject/issuer/DNS names available on dne_certificate_info with the same labels.
+
+        - alert: DNECertificateExpiringCritical
+          expr: |
+            (dne_certificate_not_after_seconds - time()) < (3 * 24 * 3600)
+            and (dne_certificate_not_after_seconds - time()) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate in {{ $labels.namespace }}/{{ $labels.secret }} expires within 3 days"
+            description: |
+              Certificate at key={{ $labels.key }} index={{ $labels.cert_index }}
+              in Secret {{ $labels.namespace }}/{{ $labels.secret }} expires in less than 3 days.
+              Rotate it now.
+
+        - alert: DNECertificateExpired
+          expr: (dne_certificate_not_after_seconds - time()) < 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate in {{ $labels.namespace }}/{{ $labels.secret }} has expired"
+            description: |
+              Certificate at key={{ $labels.key }} index={{ $labels.cert_index }}
+              in Secret {{ $labels.namespace }}/{{ $labels.secret }} expired.
+              Any client validating this certificate will reject the connection.
+
+        - alert: DNECertificateNotYetValid
+          expr: (dne_certificate_not_before_seconds - time()) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate in {{ $labels.namespace }}/{{ $labels.secret }} is not yet valid"
+            description: |
+              Certificate at key={{ $labels.key }} index={{ $labels.cert_index }}
+              has NotBefore in the future. This usually means clock skew or a misissued certificate.
+
+    - name: dne.operations
+      rules:
+        - alert: DNEControllerDown
+          expr: up{job=~".*dne.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "dne controller is not being scraped"
+            description: |
+              No successful scrapes of the dne controller in the last 5 minutes.
+              Certificate expiry metrics are stale; alerts based on dne_certificate_* will not fire reliably.
+
+        - alert: DNEParseErrorsRising
+          expr: sum by (namespace, secret) (rate(dne_secret_parse_errors_total[15m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "dne is failing to parse PEM blocks in {{ $labels.namespace }}/{{ $labels.secret }}"
+            description: |
+              The Secret {{ $labels.namespace }}/{{ $labels.secret }} contains values that begin like
+              PEM CERTIFICATE blocks but cannot be parsed as X.509. Check whether the Secret has
+              been corrupted or whether a non-cert value is being detected as a cert.
