@@ -7,8 +7,6 @@
 
 dne is a tiny Kubernetes controller that watches every `Secret` in the cluster, parses any X.509 certificate it finds (in any value, not just `tls.crt`), and exports Prometheus metrics for the certificates' validity windows. Pair it with the bundled Grafana dashboard and PrometheusRule to get a single pane of glass for "which TLS materials are about to expire."
 
-It is a complement to cert-manager (which automates renewal where it can) and to `kubelet-cert-checker` / `x509-certificate-exporter` (which focus on node certs and explicit file inputs): dne handles whatever made it into a `Secret`, regardless of who put it there.
-
 ## Highlights
 
 - **Zero configuration to get useful output**: install the chart and you have `dne_certificate_not_after_seconds` for every cert in the cluster.
@@ -91,12 +89,6 @@ Even with `--namespaces` set, dne uses a `ClusterRole` (`secrets: [get,list,watc
 
 **Does dne ever write to Secrets?**
 No. dne is a read-only observer.
-
-**How does this compare to cert-manager?**
-cert-manager *issues and rotates* certificates. dne *observes* them. They compose well: cert-manager keeps things fresh; dne tells you about anything cert-manager doesn't already own.
-
-**How does this compare to x509-certificate-exporter?**
-[x509-certificate-exporter](https://github.com/enix/x509-certificate-exporter) reads cert files from the filesystem (mounted into a DaemonSet). dne reads from the Kubernetes API server, so it covers any Secret regardless of whether it's mounted anywhere yet.
 
 ## Contributing
 
