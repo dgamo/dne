@@ -77,7 +77,7 @@ func TestTracker_EmitSingleCert(t *testing.T) {
 	reg, tr := newTracker(t)
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"emit.test"}})
-	parsed, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM})
+	parsed, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM}, cert.ParseOptions{})
 
 	key := client.ObjectKey{Namespace: "default", Name: "emit"}
 	tr.Sync(key, parsed)
@@ -98,7 +98,7 @@ func TestTracker_Idempotent(t *testing.T) {
 	reg, tr := newTracker(t)
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"idem.test"}})
-	parsed, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM})
+	parsed, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM}, cert.ParseOptions{})
 	key := client.ObjectKey{Namespace: "default", Name: "idem"}
 
 	tr.Sync(key, parsed)
@@ -116,11 +116,11 @@ func TestTracker_Rotation(t *testing.T) {
 	key := client.ObjectKey{Namespace: "default", Name: "rotate"}
 
 	old := testutil.NewCert(t, testutil.CertOptions{CommonName: "old.test", DNSNames: []string{"old.test"}})
-	parsedOld, _ := cert.ParseAll(map[string][]byte{"tls.crt": old.PEM})
+	parsedOld, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": old.PEM}, cert.ParseOptions{})
 	tr.Sync(key, parsedOld)
 
 	newCert := testutil.NewCert(t, testutil.CertOptions{CommonName: "new.test", DNSNames: []string{"new.test"}})
-	parsedNew, _ := cert.ParseAll(map[string][]byte{"tls.crt": newCert.PEM})
+	parsedNew, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": newCert.PEM}, cert.ParseOptions{})
 	tr.Sync(key, parsedNew)
 
 	mf := gather(t, reg)
@@ -139,11 +139,11 @@ func TestTracker_PartialRotation(t *testing.T) {
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{CommonName: "leaf.test"})
 	intermediate := testutil.NewCert(t, testutil.CertOptions{CommonName: "intermediate.test", IsCA: true})
-	parsedFull, _ := cert.ParseAll(map[string][]byte{"bundle.pem": testutil.Bundle(leaf, intermediate)})
+	parsedFull, _, _ := cert.ParseAll(map[string][]byte{"bundle.pem": testutil.Bundle(leaf, intermediate)}, cert.ParseOptions{})
 	tr.Sync(key, parsedFull)
 
 	// Now the Secret loses the intermediate.
-	parsedLeafOnly, _ := cert.ParseAll(map[string][]byte{"bundle.pem": leaf.PEM})
+	parsedLeafOnly, _, _ := cert.ParseAll(map[string][]byte{"bundle.pem": leaf.PEM}, cert.ParseOptions{})
 	tr.Sync(key, parsedLeafOnly)
 
 	mf := gather(t, reg)
@@ -161,7 +161,7 @@ func TestTracker_DropSecret(t *testing.T) {
 	key := client.ObjectKey{Namespace: "default", Name: "drop"}
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"drop.test"}})
-	parsed, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM})
+	parsed, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM}, cert.ParseOptions{})
 	tr.Sync(key, parsed)
 
 	tr.DropSecret(key)
@@ -191,7 +191,7 @@ func TestTracker_SyncEmptyDropsTracking(t *testing.T) {
 	key := client.ObjectKey{Namespace: "default", Name: "now-empty"}
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"e.test"}})
-	parsed, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM})
+	parsed, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM}, cert.ParseOptions{})
 	tr.Sync(key, parsed)
 
 	// Secret rewritten with no certs (e.g. user blanked tls.crt).
@@ -210,7 +210,7 @@ func TestTracker_Concurrent(t *testing.T) {
 	_, tr := newTracker(t)
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"conc.test"}})
-	parsed, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM})
+	parsed, _, _ := cert.ParseAll(map[string][]byte{"tls.crt": leaf.PEM}, cert.ParseOptions{})
 
 	const n = 100
 	var wg sync.WaitGroup

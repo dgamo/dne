@@ -4,6 +4,18 @@ All notable changes to dne are documented here. The format is based on [Keep a C
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-23
+
+### Added
+- Raw X.509 DER detection — values that are bare DER bytes (no PEM envelope) are now picked up.
+- PKCS#12 / PFX detection, including encrypted bundles. Passwords are sourced from a separate data key in the same Secret via the new `dne.k8s.io/pkcs12-passwords` annotation: `dne.k8s.io/pkcs12-passwords: "cert.p12=cert-password"`. The leaf cert lands at `cert_index="0"`, with any CA chain at incrementing indexes.
+- New metric `dne_secret_locked_total{namespace,secret,key,reason}` for values that look like PKCS#12 bundles but couldn't be opened. `reason` ∈ `{pkcs12_no_password, pkcs12_wrong_password, pkcs12_decode_error}`.
+- New bundled alert `DNESecretLocked` that fires when any Secret has locked PKCS#12 values for over 30m.
+- `internal/testutil`: `NewDER`, `NewPKCS12`, `NewPKCS12Chain` helpers built on `software.sslmate.com/src/go-pkcs12`.
+
+### Changed
+- `cert.ParseAll` now takes a `ParseOptions` struct and returns a third value, a slice of `LockedBlob`. Existing PEM behaviour is unchanged.
+
 ## [0.1.0] — 2026-05-20
 
 ### Added

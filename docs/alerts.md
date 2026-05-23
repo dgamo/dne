@@ -63,6 +63,14 @@ When installed via Helm with `--set prometheusRule.enabled=true`, the same alert
 - **Expression**: `sum by (namespace, secret) (rate(dne_secret_parse_errors_total[15m])) > 0`
 - **Meaning**: dne found PEM `CERTIFICATE` blocks it couldn't parse as X.509 in some Secret. Usually a corrupted cert or a value that happens to start with `-----BEGIN CERTIFICATE-----` but is malformed.
 
+### `DNESecretLocked`
+
+- **Severity**: warning
+- **For**: 30m
+- **Expression**: `sum by (namespace, secret) (dne_secret_locked_total) > 0`
+- **Meaning**: dne found at least one value in this Secret that looks like a PKCS#12 / PFX bundle but couldn't open it (no password supplied, wrong password, or a decode error). These certs are not being tracked.
+- **How to silence**: add the `dne.k8s.io/pkcs12-passwords` annotation pointing each encrypted data key to the data key holding its password (same Secret). See `docs/configuration.md` for the annotation contract. If the bundle is genuinely something you don't want to track (e.g. a test fixture), label the Secret out of dne's selector instead.
+
 ## Routing tips
 
 These alerts include the labels `namespace` and `secret` — route them to the team that owns the Secret. If you label your Secrets with team ownership, add a relabeling step in your Alertmanager config to project the team label onto the alert.

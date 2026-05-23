@@ -11,11 +11,12 @@ import "github.com/prometheus/client_golang/prometheus"
 // Recorder bundles the metric collectors. A single Recorder is shared
 // by the reconciler and the tracker so they emit consistent series.
 type Recorder struct {
-	NotAfter    *prometheus.GaugeVec
-	NotBefore   *prometheus.GaugeVec
-	Info        *prometheus.GaugeVec
-	ParseErrors *prometheus.CounterVec
-	Reconciles  *prometheus.CounterVec
+	NotAfter      *prometheus.GaugeVec
+	NotBefore     *prometheus.GaugeVec
+	Info          *prometheus.GaugeVec
+	ParseErrors   *prometheus.CounterVec
+	Reconciles    *prometheus.CounterVec
+	LockedSecrets *prometheus.CounterVec
 }
 
 // Reconcile result labels.
@@ -59,7 +60,11 @@ func New(reg prometheus.Registerer) *Recorder {
 			Name: "dne_reconcile_total",
 			Help: "Total Secret reconciles, partitioned by outcome.",
 		}, []string{"result"}),
+		LockedSecrets: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "dne_secret_locked_total",
+			Help: "Secret values that contain a cert-shaped blob (typically PKCS#12 / PFX) that dne could not decode. The reason label distinguishes a missing password, a wrong password, and other decode errors.",
+		}, []string{"namespace", "secret", "key", "reason"}),
 	}
-	reg.MustRegister(r.NotAfter, r.NotBefore, r.Info, r.ParseErrors, r.Reconciles)
+	reg.MustRegister(r.NotAfter, r.NotBefore, r.Info, r.ParseErrors, r.Reconciles, r.LockedSecrets)
 	return r
 }

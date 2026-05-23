@@ -14,6 +14,8 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 // CertOptions tunes a generated self-signed certificate. Zero values pick
@@ -149,4 +151,42 @@ func MustParseTime(t testing.TB, s string) time.Time {
 // what would land in a Prometheus gauge.
 func FormatNotAfter(c *x509.Certificate) string {
 	return fmt.Sprintf("%d", c.NotAfter.Unix())
+}
+
+// NewDER returns a fresh self-signed cert's raw DER bytes, with no PEM
+// envelope. Used to test the raw-DER detection path.
+func NewDER(t testing.TB, opts CertOptions) []byte {
+	t.Helper()
+	g := NewCert(t, opts)
+	return g.Cert.Raw
+}
+
+// NewPKCS12 builds a PKCS#12 bundle containing one cert and its private
+// key. Pass password="" to produce an unencrypted bundle.
+func NewPKCS12(t testing.TB, opts CertOptions, password string) []byte {
+	t.Helper()
+	g := NewCert(t, opts)
+	return encodePKCS12(t, g.Key, g.Cert, nil, password)
+}
+
+// NewPKCS12Chain builds a PKCS#12 bundle containing a leaf cert (with
+// its private key) and zero or more CA certs in the chain. The private
+// key belongs to the leaf only — the CAs are added as ca-bag entries.
+func NewPKCS12Chain(t testing.TB, leaf GeneratedCert, cas []GeneratedCert, password string) []byte {
+	t.Helper()
+	caCerts := make([]*x509.Certificate, 0, len(cas))
+	for _, c := range cas {
+		caCerts = append(caCerts, c.Cert)
+	}
+	return encodePKCS12(t, leaf.Key, leaf.Cert, caCerts, password)
+}
+
+func encodePKCS12(t testing.TB, key *ecdsa.PrivateKey, cert *x509.Certificate, cas []*x509.Certificate, password string) []byte {
+	t.Helper()
+	encoder := pkcs12.Modern
+	out, err := encoder.Encode(key, cert, cas, password)
+	if err != nil {
+		t.Fatalf("encode pkcs12: %v", err)
+	}
+	return out
 }

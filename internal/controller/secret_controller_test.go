@@ -361,3 +361,143 @@ func TestReconcile_LabelSelector(t *testing.T) {
 		return !metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "labeled")
 	})
 }
+
+// ---- PKCS#12 reconcile flow ----------------------------------------------
+
+func TestReconcile_PKCS12_NoAnnotation_Locked(t *testing.T) {
+	f := setupEnvtest(t, nil)
+	ctx := context.Background()
+
+	pfx := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx-locked.test"}, "hunter2")
+
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.namespace, Name: "pfx-no-anno"},
+		Data:       map[string][]byte{"cert.p12": pfx},
+	}
+	if err := f.client.Create(ctx, sec); err != nil {
+		t.Fatalf("create secret: %v", err)
+	}
+
+	eventually(t, func() bool {
+		return metricExists(f.gather(t), "dne_secret_locked_total", f.namespace, "pfx-no-anno")
+	})
+	if metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "pfx-no-anno") {
+		t.Errorf("locked PFX without password should not produce cert series")
+	}
+}
+
+func TestReconcile_PKCS12_AnnotationFlow(t *testing.T) {
+	f := setupEnvtest(t, nil)
+	ctx := context.Background()
+
+	pfx := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx-flow.test", DNSNames: []string{"pfx-flow.test"}}, "hunter2")
+
+	// Create without annotation → locked.
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.namespace, Name: "pfx-flow"},
+		Data: map[string][]byte{
+			"cert.p12":      pfx,
+			"cert-password": []byte("hunter2"),
+		},
+	}
+	if err := f.client.Create(ctx, sec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	eventually(t, func() bool {
+		return metricExists(f.gather(t), "dne_secret_locked_total", f.namespace, "pfx-flow")
+	})
+
+	// Add the annotation → cert appears.
+	current := &corev1.Secret{}
+	if err := f.client.Get(ctx, types.NamespacedName{Namespace: f.namespace, Name: "pfx-flow"}, current); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if current.Annotations == nil {
+		current.Annotations = map[string]string{}
+	}
+	current.Annotations["dne.k8s.io/pkcs12-passwords"] = "cert.p12=cert-password"
+	if err := f.client.Update(ctx, current); err != nil {
+		t.Fatalf("update with annotation: %v", err)
+	}
+	eventually(t, func() bool {
+		return metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "pfx-flow")
+	})
+
+	// Sanity: the info series carries the correct subject.
+	mf := f.gather(t)
+	series := []*dto.Metric{}
+	for _, fam := range mf {
+		if fam.GetName() != "dne_certificate_info" {
+			continue
+		}
+		for _, m := range fam.GetMetric() {
+			ns, sec := "", ""
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "namespace" {
+					ns = l.GetValue()
+				}
+				if l.GetName() == "secret" {
+					sec = l.GetValue()
+				}
+			}
+			if ns == f.namespace && sec == "pfx-flow" {
+				series = append(series, m)
+			}
+		}
+	}
+	if len(series) != 1 {
+		t.Fatalf("expected 1 info series, got %d", len(series))
+	}
+	subj := ""
+	for _, l := range series[0].GetLabel() {
+		if l.GetName() == "subject" {
+			subj = l.GetValue()
+		}
+	}
+	if subj != "CN=pfx-flow.test" {
+		t.Errorf("subject = %q, want CN=pfx-flow.test", subj)
+	}
+
+	// Remove the annotation → cert series disappears.
+	if err := f.client.Get(ctx, types.NamespacedName{Namespace: f.namespace, Name: "pfx-flow"}, current); err != nil {
+		t.Fatalf("get after add: %v", err)
+	}
+	delete(current.Annotations, "dne.k8s.io/pkcs12-passwords")
+	if err := f.client.Update(ctx, current); err != nil {
+		t.Fatalf("update remove anno: %v", err)
+	}
+	eventually(t, func() bool {
+		return !metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "pfx-flow")
+	})
+}
+
+func TestReconcile_MixedFormatsSecret(t *testing.T) {
+	f := setupEnvtest(t, nil)
+	ctx := context.Background()
+
+	pemLeaf := testutil.NewCert(t, testutil.CertOptions{CommonName: "pem-side.test"})
+	pfxA := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx-a.test"}, "pwA")
+	pfxB := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx-b.test"}, "pwB")
+
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: f.namespace, Name: "mixed",
+			Annotations: map[string]string{
+				"dne.k8s.io/pkcs12-passwords": "a.p12=pwA-key,b.p12=pwB-key",
+			},
+		},
+		Data: map[string][]byte{
+			"tls.crt": pemLeaf.PEM,
+			"a.p12":   pfxA,
+			"b.p12":   pfxB,
+			"pwA-key": []byte("pwA"),
+			"pwB-key": []byte("pwB"),
+		},
+	}
+	if err := f.client.Create(ctx, sec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	eventually(t, func() bool {
+		return metricCount(f.gather(t), "dne_certificate_info", f.namespace, "mixed") == 3
+	})
+}

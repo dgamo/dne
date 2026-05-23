@@ -74,3 +74,58 @@ env:
 | `/readyz`   | `8081`       | Readiness probe.                     |
 
 Probes are wired up in the Deployment template; the `/healthz` and `/readyz` handlers are controller-runtime's `healthz.Ping` (returns 200 once the manager is started).
+
+## PKCS#12 password mapping
+
+Since v0.2.0 dne supports detecting certs inside PKCS#12 / PFX bundles in addition to PEM blocks. Encrypted bundles need the password — but Kubernetes Secrets don't have a standard convention for "this data key is the password for that data key", so dne uses an annotation to express the mapping.
+
+### Annotation
+
+`dne.k8s.io/pkcs12-passwords` on the Secret. Value is a comma-separated list of `<datakey>=<passwordkey>` entries; whitespace and newlines around entries are tolerated.
+
+The motivating example — a Java payment integration Secret that ships two encrypted `.p12` bundles with their passwords stored under separate keys in the same Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: eftpos-integration
+  annotations:
+    dne.k8s.io/pkcs12-passwords: |
+      eftpos-live-certificate=EFTPOS_LIVE_SSL_CERTIFICATE_PASSWORD,
+      eftpos-test-certificate=EFTPOS_TEST_SSL_CERTIFICATE_PASSWORD
+type: Opaque
+data:
+  eftpos-live-certificate: <base64 PFX>
+  eftpos-test-certificate: <base64 PFX>
+  EFTPOS_LIVE_SSL_CERTIFICATE_PASSWORD: <base64 password>
+  EFTPOS_TEST_SSL_CERTIFICATE_PASSWORD: <base64 password>
+```
+
+After this annotation is added, dne emits the usual `dne_certificate_*` series for the certs inside each PFX bundle, with `cert_index="0"` for the leaf and incrementing indexes for any intermediate CAs in the chain.
+
+### Detection order
+
+For every value in a Secret, dne tries three formats in sequence and stops at the first that produces certs:
+
+1. **PEM** — the canonical `-----BEGIN CERTIFICATE-----` blocks.
+2. **Raw DER** — bare X.509 DER bytes with no envelope (rare, but handled).
+3. **PKCS#12** — only attempted when the bytes look plausible (ASN.1 SEQUENCE long-form prefix `0x30 0x82 ...`). Uses the password from the annotation map for that data key; falls back to the empty password if no mapping is configured (covers unencrypted bundles).
+
+Values that match none of the three are silently skipped — they're not certs and don't generate noise.
+
+### When dne can't open a PKCS#12
+
+If a value looks like a PKCS#12 bundle but dne can't open it, the `dne_secret_locked_total` counter increments with one of three `reason` labels:
+
+- `pkcs12_no_password` — no password mapping configured and the empty password failed.
+- `pkcs12_wrong_password` — the supplied password didn't decrypt the bundle.
+- `pkcs12_decode_error` — the library returned a non-password error (corrupt bundle, unsupported encryption algorithm, or a false positive on the ASN.1 prefix).
+
+The bundled `DNESecretLocked` alert (in `deploy/prometheus/dne-rules.yaml`) fires when any of these reach the operator's attention.
+
+### Caveats
+
+- Cross-Secret password references aren't supported in v0.2 — the password must live in the same Secret as the encrypted bundle.
+- The password value is treated as plain text; trailing `\r\n\t ` is trimmed (a common artefact when password files are loaded via `--from-file`).
+- If the annotation lists a data key that doesn't exist in the Secret, that entry is ignored. The encrypted value still gets the empty-password attempt and is reported as `pkcs12_no_password` if that fails.

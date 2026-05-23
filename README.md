@@ -10,7 +10,8 @@ dne is a tiny Kubernetes controller that watches every `Secret` in the cluster, 
 ## Highlights
 
 - **Zero configuration to get useful output**: install the chart and you have `dne_certificate_not_after_seconds` for every cert in the cluster.
-- **PEM scan, not just `kubernetes.io/tls`**: handles Helm-chart-managed Secrets that use Opaque type and arbitrary key names, plus multi-cert chains via a `cert_index` label.
+- **Three formats supported**: PEM (`-----BEGIN CERTIFICATE-----`), raw X.509 DER, and PKCS#12 / PFX bundles (including encrypted, with the password stored in the same Secret under a separate data key — see [docs/configuration.md](docs/configuration.md#pkcs12-password-mapping)).
+- **Multi-cert chains** via a `cert_index` label.
 - **Stable metric lifecycle**: when a cert rotates, the previous series with the old subject/serial/SANs are removed; when a Secret is deleted, all its series are removed. No accumulating stale series.
 - **Optional namespace and label-selector filtering** at the watch layer, so large clusters can scope the controller to a subset.
 - **Bundled Grafana dashboard and PrometheusRule**, both gated by chart values and discoverable by the kube-prometheus-stack sidecar / operator out of the box.
@@ -39,7 +40,13 @@ Then in Prometheus:
 
 ## How it works
 
-dne uses controller-runtime to watch `Secret` objects. For each one it walks every value, runs `pem.Decode` in a loop, and for each `CERTIFICATE` block calls `x509.ParseCertificate`. Non-PEM values are skipped silently. Multi-cert chains produce one metric series per cert, distinguished by a `cert_index` label.
+dne uses controller-runtime to watch `Secret` objects. For each one it walks every value and tries three formats in sequence, stopping at the first that produces certs:
+
+1. **PEM** — `pem.Decode` in a loop, `x509.ParseCertificate` for each `CERTIFICATE` block.
+2. **Raw DER** — `x509.ParseCertificate` directly on the bytes.
+3. **PKCS#12** — `pkcs12.DecodeChain` with the password (if any) looked up from the `dne.k8s.io/pkcs12-passwords` annotation; falls back to the empty password for unencrypted bundles.
+
+Values that match none of those are skipped silently. Multi-cert chains produce one metric series per cert, distinguished by a `cert_index` label.
 
 Two `Gauge` collectors carry the numeric data (`dne_certificate_not_after_seconds`, `dne_certificate_not_before_seconds`) with a small label set; a companion `dne_certificate_info` gauge carries the identifying labels (subject, issuer, serial, DNS SANs) at value `1`, following the kube-state-metrics pattern. This keeps the queryable gauges low-cardinality while letting dashboards join in the human-readable fields.
 

@@ -47,6 +47,17 @@ Increments when a value contained a `BEGIN CERTIFICATE` block but the DER conten
 
 Useful as a smoke test (`rate(dne_reconcile_total{result="success"}[5m])`) and to alert on rising error rates.
 
+## `dne_secret_locked_total`
+
+- **Type**: counter
+- **Labels**: `namespace`, `secret`, `key`, `reason`.
+- **Reason values**:
+  - `pkcs12_no_password` — value looks like PKCS#12 but no password mapping is configured for this data key and the empty-password attempt failed.
+  - `pkcs12_wrong_password` — a password was supplied via `dne.k8s.io/pkcs12-passwords` but didn't decrypt the bundle.
+  - `pkcs12_decode_error` — the PKCS#12 library returned a non-password error (corrupt bundle, unsupported algorithm, or a false-positive ASN.1 prefix).
+
+Increments every reconcile until the operator either supplies a working password via the `dne.k8s.io/pkcs12-passwords` annotation or accepts that the bundle won't be tracked. The rate of increase is a stand-in for "how often is this Secret being reconciled while still locked" — useful for prioritising remediation. See `docs/configuration.md#pkcs12-password-mapping` for the annotation contract.
+
 ## Label cardinality
 
 The slim metrics carry four labels: `namespace`, `secret`, `key`, `cert_index`. For a cluster with 5,000 Secrets averaging 1.2 certs each, that's roughly 6,000 series per slim gauge, and the same per `dne_certificate_info` (with the additional identifying labels). This is well within typical Prometheus limits.
