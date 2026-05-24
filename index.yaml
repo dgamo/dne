@@ -5,6 +5,33 @@ entries:
       artifacthub.io/category: security
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
+    appVersion: 0.2.0
+    created: "2026-05-24T02:35:21.215327837Z"
+    description: Do-Not-Expire — Prometheus metrics for every certificate stored in
+      Kubernetes Secrets.
+    digest: 326735d7a4a97ec28f4d02a842488f887af292c3ac4e3169b63efd51577c5806
+    home: https://github.com/dgamo/dne
+    keywords:
+    - certificates
+    - tls
+    - prometheus
+    - security
+    - secrets
+    kubeVersion: '>=1.27.0-0'
+    maintainers:
+    - name: Daniel Gallardo
+      url: https://github.com/dgamo
+    name: dne
+    sources:
+    - https://github.com/dgamo/dne
+    type: application
+    urls:
+    - https://github.com/dgamo/dne/releases/download/dne-0.2.0/dne-0.2.0.tgz
+    version: 0.2.0
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
     appVersion: 0.1.0
     created: "2026-05-23T07:39:04.75945718Z"
     description: Do-Not-Expire — Prometheus metrics for every certificate stored in
@@ -28,4 +55,4 @@ entries:
     urls:
     - https://github.com/dgamo/dne/releases/download/dne-0.1.0/dne-0.1.0.tgz
     version: 0.1.0
-generated: "2026-05-23T07:39:04.759466894Z"
+generated: "2026-05-24T02:35:21.215335852Z"
