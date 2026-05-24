@@ -162,8 +162,8 @@
           "custom": {"align": "auto", "displayMode": "auto"},
           "thresholds": {"mode": "absolute", "steps": [
             {"color": "green", "value": null},
-            {"color": "yellow", "value": 14 * 86400},
-            {"color": "red", "value": 3 * 86400}
+            {"color": "yellow", "value": 1209600},
+            {"color": "red", "value": 259200}
           ]},
           "unit": "s"
         },
@@ -187,7 +187,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "topk(25, (dne_certificate_not_after_seconds{namespace=~\"$namespace\", secret=~\"$secret\"} - time()) * on(namespace, secret, key, cert_index) group_left(subject, issuer, dns_names) dne_certificate_info)",
+          "expr": "bottomk(25, (dne_certificate_not_after_seconds{namespace=~\"$namespace\", secret=~\"$secret\"} - time()) * on(namespace, secret, key, cert_index) group_left(subject, issuer, dns_names) dne_certificate_info)",
           "format": "table",
           "instant": true,
           "refId": "A"

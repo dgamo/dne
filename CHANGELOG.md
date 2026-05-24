@@ -4,6 +4,12 @@ All notable changes to dne are documented here. The format is based on [Keep a C
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-24
+
+### Fixed
+- Grafana dashboard JSON failed to import because the threshold values used arithmetic expressions (`14 * 86400`) — pre-computed to literals.
+- "Top 25 closest to expiry" panel used `topk` (furthest from expiry) instead of `bottomk` (closest), so it surfaced root CAs with decades of validity instead of the leaf certs operators actually care about.
+
 ## [0.2.0] — 2026-05-23
 
 ### Added
