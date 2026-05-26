@@ -1,6 +1,6 @@
 // Package cert extracts X.509 certificates from arbitrary byte slices.
 //
-// ParseAll walks the data of every key in a Secret and tries three
+// ParseAll walks the data of every key in a Secret and tries four
 // detection strategies per value, in order:
 //
 //  1. PEM CERTIFICATE blocks (the canonical format used by
@@ -10,6 +10,9 @@
 //  3. PKCS#12 / PFX bundles, optionally encrypted with a password
 //     supplied via ParseOptions.PKCS12Passwords (typical for Java,
 //     .NET, and payment-integration workloads).
+//  4. Java KeyStore (JKS / JCEKS) bundles, using the same password
+//     map as PKCS#12 (the format-agnostic name "PKCS12Passwords" is
+//     historical; the cascade dispatches on magic bytes).
 //
 // The cascade stops on the first format that produces certs for a
 // given value. Values that match none are silently skipped so that
@@ -154,6 +157,10 @@ func parseValue(key string, value []byte, opts ParseOptions) ([]ParsedCert, []Pa
 
 	if looksLikeASN1Sequence(value) {
 		return parseValuePKCS12(key, value, opts)
+	}
+
+	if looksLikeJKS(value) {
+		return parseValueJKS(key, value, opts)
 	}
 
 	return nil, nil, nil

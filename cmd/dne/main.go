@@ -96,7 +96,12 @@ func run(args []string) error {
 	rec := metrics.New(ctrlmetrics.Registry)
 	tracker := metrics.NewTracker(rec)
 
-	r := &controller.SecretReconciler{Client: mgr.GetClient(), Tracker: tracker, Metrics: rec}
+	r := &controller.SecretReconciler{
+		Client:          mgr.GetClient(),
+		Tracker:         tracker,
+		Metrics:         rec,
+		SkipCertManager: cfg.SkipCertManager,
+	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup reconciler: %w", err)
 	}

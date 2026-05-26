@@ -10,7 +10,8 @@ dne is a tiny Kubernetes controller that watches every `Secret` in the cluster, 
 ## Highlights
 
 - **Zero configuration to get useful output**: install the chart and you have `dne_certificate_not_after_seconds` for every cert in the cluster.
-- **Three formats supported**: PEM (`-----BEGIN CERTIFICATE-----`), raw X.509 DER, and PKCS#12 / PFX bundles (including encrypted, with the password stored in the same Secret under a separate data key — see [docs/configuration.md](docs/configuration.md#pkcs12-password-mapping)).
+- **Four formats supported**: PEM (`-----BEGIN CERTIFICATE-----`), raw X.509 DER, PKCS#12 / PFX bundles, and JKS / JCEKS Java keystores (encrypted bundles use a password from the same Secret via annotation — see [docs/configuration.md](docs/configuration.md#pkcs12-password-mapping)).
+- **cert-manager interop**: `--skip-cert-manager` filters out Secrets cert-manager already manages, so dne raises alerts only on the rest.
 - **Multi-cert chains** via a `cert_index` label.
 - **Stable metric lifecycle**: when a cert rotates, the previous series with the old subject/serial/SANs are removed; when a Secret is deleted, all its series are removed. No accumulating stale series.
 - **Optional namespace and label-selector filtering** at the watch layer, so large clusters can scope the controller to a subset.
@@ -40,13 +41,16 @@ Then in Prometheus:
 
 ## How it works
 
-dne uses controller-runtime to watch `Secret` objects. For each one it walks every value and tries three formats in sequence, stopping at the first that produces certs:
+dne uses controller-runtime to watch `Secret` objects. For each one it walks every value and tries four formats in sequence, stopping at the first that produces certs:
 
 1. **PEM** — `pem.Decode` in a loop, `x509.ParseCertificate` for each `CERTIFICATE` block.
 2. **Raw DER** — `x509.ParseCertificate` directly on the bytes.
 3. **PKCS#12** — `pkcs12.DecodeChain` with the password (if any) looked up from the `dne.k8s.io/pkcs12-passwords` annotation; falls back to the empty password for unencrypted bundles.
+4. **JKS / JCEKS** — Java KeyStore decoded with the same annotation-supplied password; certificates emitted in alphabetical alias order with sequential `cert_index`.
 
 Values that match none of those are skipped silently. Multi-cert chains produce one metric series per cert, distinguished by a `cert_index` label.
+
+If `--skip-cert-manager` (`skipCertManager: true` in Helm) is on, Secrets bearing `cert-manager.io/certificate-name` are filtered out entirely — their reconciles count toward `dne_reconcile_total{result="skipped"}` and any previously-emitted series are cleared.
 
 Two `Gauge` collectors carry the numeric data (`dne_certificate_not_after_seconds`, `dne_certificate_not_before_seconds`) with a small label set; a companion `dne_certificate_info` gauge carries the identifying labels (subject, issuer, serial, DNS SANs) at value `1`, following the kube-state-metrics pattern. This keeps the queryable gauges low-cardinality while letting dashboards join in the human-readable fields.
 

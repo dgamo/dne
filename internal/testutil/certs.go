@@ -4,6 +4,7 @@
 package testutil
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	keystore "github.com/pavlo-v-chernykh/keystore-go/v4"
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
@@ -189,4 +191,83 @@ func encodePKCS12(t testing.TB, key *ecdsa.PrivateKey, cert *x509.Certificate, c
 		t.Fatalf("encode pkcs12: %v", err)
 	}
 	return out
+}
+
+// NewJKS builds a Java KeyStore containing one private-key entry (the
+// leaf cert + key). password "" produces a keystore whose integrity
+// MAC is computed with an empty password (still valid JKS, just not
+// useful).
+func NewJKS(t testing.TB, opts CertOptions, password string) []byte {
+	t.Helper()
+	g := NewCert(t, opts)
+	return encodeJKS(t, []jksEntry{{alias: "demo", privateKey: g.Key, chain: []*x509.Certificate{g.Cert}}}, password)
+}
+
+// NewJKSChain builds a keystore where one private-key entry carries
+// leaf + intermediates as its certificate chain.
+func NewJKSChain(t testing.TB, leaf GeneratedCert, chain []GeneratedCert, password string) []byte {
+	t.Helper()
+	certs := make([]*x509.Certificate, 0, 1+len(chain))
+	certs = append(certs, leaf.Cert)
+	for _, c := range chain {
+		certs = append(certs, c.Cert)
+	}
+	return encodeJKS(t, []jksEntry{{alias: "demo", privateKey: leaf.Key, chain: certs}}, password)
+}
+
+// NewJKSTruststore builds a keystore of trusted-cert entries, one per
+// input. Alias names are deterministic (`ca-0`, `ca-1`, …) so tests can
+// assert on cert_index ordering after the in-package sort.
+func NewJKSTruststore(t testing.TB, certs []GeneratedCert, password string) []byte {
+	t.Helper()
+	entries := make([]jksEntry, len(certs))
+	for i, c := range certs {
+		entries[i] = jksEntry{alias: fmt.Sprintf("ca-%d", i), trusted: c.Cert}
+	}
+	return encodeJKS(t, entries, password)
+}
+
+type jksEntry struct {
+	alias      string
+	privateKey *ecdsa.PrivateKey   // nil → trusted-cert entry
+	chain      []*x509.Certificate // leaf first
+	trusted    *x509.Certificate
+}
+
+func encodeJKS(t testing.TB, entries []jksEntry, password string) []byte {
+	t.Helper()
+	ks := keystore.New()
+	now := time.Now()
+	for _, e := range entries {
+		switch {
+		case e.privateKey != nil:
+			der, err := x509.MarshalPKCS8PrivateKey(e.privateKey)
+			if err != nil {
+				t.Fatalf("marshal key: %v", err)
+			}
+			ksChain := make([]keystore.Certificate, len(e.chain))
+			for i, c := range e.chain {
+				ksChain[i] = keystore.Certificate{Type: "X.509", Content: c.Raw}
+			}
+			if err := ks.SetPrivateKeyEntry(e.alias, keystore.PrivateKeyEntry{
+				CreationTime:     now,
+				PrivateKey:       der,
+				CertificateChain: ksChain,
+			}, []byte(password)); err != nil {
+				t.Fatalf("set private key entry: %v", err)
+			}
+		case e.trusted != nil:
+			if err := ks.SetTrustedCertificateEntry(e.alias, keystore.TrustedCertificateEntry{
+				CreationTime: now,
+				Certificate:  keystore.Certificate{Type: "X.509", Content: e.trusted.Raw},
+			}); err != nil {
+				t.Fatalf("set trusted cert entry: %v", err)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := ks.Store(&buf, []byte(password)); err != nil {
+		t.Fatalf("store keystore: %v", err)
+	}
+	return buf.Bytes()
 }

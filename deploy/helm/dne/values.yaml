@@ -24,6 +24,12 @@ namespaces: []
 # Empty means no label filter.
 labelSelector: ""
 
+# When true, dne ignores any Secret carrying the
+# `cert-manager.io/certificate-name` annotation. Useful for clusters
+# where cert-manager already handles rotation visibility and you don't
+# want dne raising redundant alerts on those certs.
+skipCertManager: false
+
 leaderElection:
   enabled: false
   # Name of the coordination.k8s.io/Lease used for leader election.

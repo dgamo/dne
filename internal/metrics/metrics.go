@@ -24,6 +24,7 @@ const (
 	ReconcileSuccess  = "success"
 	ReconcileError    = "error"
 	ReconcileNotFound = "notfound"
+	ReconcileSkipped  = "skipped"
 )
 
 // SeriesLabels are the slim labels shared by NotAfter / NotBefore.

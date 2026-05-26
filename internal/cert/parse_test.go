@@ -329,3 +329,141 @@ func TestParseAll_FalsePositiveASN1Prefix(t *testing.T) {
 		t.Errorf("expected single LockedDecodeError, got %v", locked)
 	}
 }
+
+// ---- JKS detection ------------------------------------------------------
+
+func TestParseAll_JKS_PrivateKeyEntry(t *testing.T) {
+	pwd := "hunter2"
+	jks := testutil.NewJKS(t, testutil.CertOptions{CommonName: "jks.test", DNSNames: []string{"jks.test"}}, pwd)
+
+	opts := cert.ParseOptions{PKCS12Passwords: map[string]string{"store.jks": pwd}}
+	out, errs, locked := cert.ParseAll(map[string][]byte{"store.jks": jks}, opts)
+	if len(errs) != 0 || len(locked) != 0 {
+		t.Fatalf("expected clean parse, got errs=%v locked=%v", errs, locked)
+	}
+	got := out["store.jks"]
+	if len(got) != 1 {
+		t.Fatalf("expected 1 cert, got %d", len(got))
+	}
+	if got[0].Subject != "CN=jks.test" {
+		t.Errorf("subject = %q", got[0].Subject)
+	}
+}
+
+func TestParseAll_JKS_Chain(t *testing.T) {
+	pwd := "secret"
+	leaf := testutil.NewCert(t, testutil.CertOptions{CommonName: "leaf.test"})
+	ca := testutil.NewCert(t, testutil.CertOptions{CommonName: "ca.test", IsCA: true})
+	jks := testutil.NewJKSChain(t, leaf, []testutil.GeneratedCert{ca}, pwd)
+
+	opts := cert.ParseOptions{PKCS12Passwords: map[string]string{"chain.jks": pwd}}
+	out, errs, locked := cert.ParseAll(map[string][]byte{"chain.jks": jks}, opts)
+	if len(errs) != 0 || len(locked) != 0 {
+		t.Fatalf("expected clean parse, got errs=%v locked=%v", errs, locked)
+	}
+	got := out["chain.jks"]
+	if len(got) != 2 {
+		t.Fatalf("expected 2 certs, got %d", len(got))
+	}
+	if got[0].Index != 0 || got[1].Index != 1 {
+		t.Errorf("expected indexes 0,1; got %d,%d", got[0].Index, got[1].Index)
+	}
+	if got[0].Subject != "CN=leaf.test" || got[1].Subject != "CN=ca.test" {
+		t.Errorf("expected leaf, ca; got %q, %q", got[0].Subject, got[1].Subject)
+	}
+}
+
+func TestParseAll_JKS_Truststore(t *testing.T) {
+	pwd := "changeit"
+	a := testutil.NewCert(t, testutil.CertOptions{CommonName: "a.test", IsCA: true})
+	b := testutil.NewCert(t, testutil.CertOptions{CommonName: "b.test", IsCA: true})
+	c := testutil.NewCert(t, testutil.CertOptions{CommonName: "c.test", IsCA: true})
+	jks := testutil.NewJKSTruststore(t, []testutil.GeneratedCert{a, b, c}, pwd)
+
+	opts := cert.ParseOptions{PKCS12Passwords: map[string]string{"trust.jks": pwd}}
+	out, errs, locked := cert.ParseAll(map[string][]byte{"trust.jks": jks}, opts)
+	if len(errs) != 0 || len(locked) != 0 {
+		t.Fatalf("expected clean parse, got errs=%v locked=%v", errs, locked)
+	}
+	got := out["trust.jks"]
+	if len(got) != 3 {
+		t.Fatalf("expected 3 certs, got %d", len(got))
+	}
+	// Aliases ca-0, ca-1, ca-2 sort alphabetically → indexes 0, 1, 2 → a, b, c.
+	wantSubjects := []string{"CN=a.test", "CN=b.test", "CN=c.test"}
+	for i, want := range wantSubjects {
+		if got[i].Index != i {
+			t.Errorf("cert %d: expected index %d, got %d", i, i, got[i].Index)
+		}
+		if got[i].Subject != want {
+			t.Errorf("cert %d: expected subject %q, got %q", i, want, got[i].Subject)
+		}
+	}
+}
+
+func TestParseAll_JKS_WrongPassword(t *testing.T) {
+	jks := testutil.NewJKS(t, testutil.CertOptions{CommonName: "wp.test"}, "real")
+
+	opts := cert.ParseOptions{PKCS12Passwords: map[string]string{"store.jks": "wrong"}}
+	out, _, locked := cert.ParseAll(map[string][]byte{"store.jks": jks}, opts)
+	if out != nil {
+		t.Errorf("expected no certs, got %v", out)
+	}
+	if len(locked) != 1 || locked[0].Reason != cert.LockedWrongPassword {
+		t.Fatalf("expected one LockedWrongPassword, got %v", locked)
+	}
+}
+
+func TestParseAll_JKS_NoPassword(t *testing.T) {
+	jks := testutil.NewJKS(t, testutil.CertOptions{CommonName: "np.test"}, "real")
+
+	out, _, locked := cert.ParseAll(map[string][]byte{"store.jks": jks}, noOpts)
+	if out != nil {
+		t.Errorf("expected no certs, got %v", out)
+	}
+	if len(locked) != 1 || locked[0].Reason != cert.LockedNoPassword {
+		t.Fatalf("expected one LockedNoPassword, got %v", locked)
+	}
+}
+
+func TestParseAll_JKS_MagicByteFalsePositive(t *testing.T) {
+	// JKS magic prefix followed by garbage. The library should fail
+	// the parse with a format error (not a password error) → LockedDecodeError.
+	value := append([]byte{0xFE, 0xED, 0xFE, 0xED}, []byte("not-a-real-keystore")...)
+	out, _, locked := cert.ParseAll(map[string][]byte{"weird.jks": value}, noOpts)
+	if out != nil {
+		t.Errorf("expected no certs, got %v", out)
+	}
+	if len(locked) != 1 || locked[0].Reason != cert.LockedDecodeError {
+		t.Fatalf("expected one LockedDecodeError, got %v", locked)
+	}
+}
+
+func TestParseAll_MixedAllFourFormats(t *testing.T) {
+	pemLeaf := testutil.NewCert(t, testutil.CertOptions{CommonName: "pem.test"})
+	derCert := testutil.NewDER(t, testutil.CertOptions{CommonName: "der.test"})
+	pfx := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx.test"}, "p")
+	jks := testutil.NewJKS(t, testutil.CertOptions{CommonName: "jks.test"}, "j")
+
+	opts := cert.ParseOptions{PKCS12Passwords: map[string]string{
+		"a.p12": "p",
+		"b.jks": "j",
+	}}
+	out, errs, locked := cert.ParseAll(map[string][]byte{
+		"tls.crt":  pemLeaf.PEM,
+		"cert.der": derCert,
+		"a.p12":    pfx,
+		"b.jks":    jks,
+	}, opts)
+	if len(errs) != 0 || len(locked) != 0 {
+		t.Fatalf("expected clean parse, got errs=%v locked=%v", errs, locked)
+	}
+	if len(out) != 4 {
+		t.Fatalf("expected 4 keys parsed, got %d (%v)", len(out), out)
+	}
+	for _, key := range []string{"tls.crt", "cert.der", "a.p12", "b.jks"} {
+		if got := out[key]; len(got) != 1 {
+			t.Errorf("key %s: expected 1 cert, got %d", key, len(got))
+		}
+	}
+}

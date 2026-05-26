@@ -85,6 +85,9 @@ Render dne CLI args from values.
 {{- if .Values.labelSelector }}
 - --label-selector={{ .Values.labelSelector }}
 {{- end }}
+{{- if .Values.skipCertManager }}
+- --skip-cert-manager=true
+{{- end }}
 - --metrics-bind-address=:{{ .Values.metricsPort }}
 - --health-probe-bind-address=:{{ .Values.healthPort }}
 - --log-level={{ .Values.logLevel }}

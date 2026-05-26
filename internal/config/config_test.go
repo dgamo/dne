@@ -147,6 +147,24 @@ func TestLeaderElectionFlag(t *testing.T) {
 	}
 }
 
+func TestSkipCertManagerFlag(t *testing.T) {
+	cfg, err := config.NewFromArgs(nil)
+	if err != nil {
+		t.Fatalf("parse defaults: %v", err)
+	}
+	if cfg.SkipCertManager {
+		t.Error("default should be skip-cert-manager=false")
+	}
+
+	cfg, err = config.NewFromArgs([]string{"--skip-cert-manager=true"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !cfg.SkipCertManager {
+		t.Error("--skip-cert-manager=true should enable the filter")
+	}
+}
+
 func TestHelpDoesntPanic(t *testing.T) {
 	// pflag.ContinueOnError returns ErrHelp without panicking; ensure
 	// NewFromArgs surfaces it as a normal error.

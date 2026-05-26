@@ -40,7 +40,12 @@ type envtestFixture struct {
 	namespace string
 }
 
-func setupEnvtest(t *testing.T, labelSel labels.Selector) *envtestFixture {
+type fixtureOpts struct {
+	LabelSelector   labels.Selector
+	SkipCertManager bool
+}
+
+func setupEnvtest(t *testing.T, opts fixtureOpts) *envtestFixture {
 	t.Helper()
 	logf.SetLogger(zap.New(zap.WriteTo(os.Stderr), zap.UseDevMode(true)))
 
@@ -62,9 +67,9 @@ func setupEnvtest(t *testing.T, labelSel labels.Selector) *envtestFixture {
 	}
 
 	cacheOpts := cache.Options{}
-	if labelSel != nil && !labelSel.Empty() {
+	if opts.LabelSelector != nil && !opts.LabelSelector.Empty() {
 		cacheOpts.ByObject = map[client.Object]cache.ByObject{
-			&corev1.Secret{}: {Label: labelSel},
+			&corev1.Secret{}: {Label: opts.LabelSelector},
 		}
 	}
 
@@ -87,7 +92,12 @@ func setupEnvtest(t *testing.T, labelSel labels.Selector) *envtestFixture {
 	rec := dnemetrics.New(reg)
 	tracker := dnemetrics.NewTracker(rec)
 
-	r := &controller.SecretReconciler{Client: mgr.GetClient(), Tracker: tracker, Metrics: rec}
+	r := &controller.SecretReconciler{
+		Client:          mgr.GetClient(),
+		Tracker:         tracker,
+		Metrics:         rec,
+		SkipCertManager: opts.SkipCertManager,
+	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("setup reconciler: %v", err)
 	}
@@ -206,7 +216,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestReconcile_CreateUpdateDelete(t *testing.T) {
-	f := setupEnvtest(t, nil)
+	f := setupEnvtest(t, fixtureOpts{})
 	ctx := context.Background()
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"e2e.test"}})
@@ -272,7 +282,7 @@ func TestReconcile_CreateUpdateDelete(t *testing.T) {
 }
 
 func TestReconcile_Bundle(t *testing.T) {
-	f := setupEnvtest(t, nil)
+	f := setupEnvtest(t, fixtureOpts{})
 	ctx := context.Background()
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{CommonName: "leaf.test"})
@@ -292,7 +302,7 @@ func TestReconcile_Bundle(t *testing.T) {
 }
 
 func TestReconcile_GarbageDataIncrementsParseErrors(t *testing.T) {
-	f := setupEnvtest(t, nil)
+	f := setupEnvtest(t, fixtureOpts{})
 	ctx := context.Background()
 
 	if err := f.client.Create(ctx, &corev1.Secret{
@@ -315,7 +325,7 @@ func TestReconcile_LabelSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse selector: %v", err)
 	}
-	f := setupEnvtest(t, sel)
+	f := setupEnvtest(t, fixtureOpts{LabelSelector: sel})
 	ctx := context.Background()
 
 	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"lsel.test"}})
@@ -365,7 +375,7 @@ func TestReconcile_LabelSelector(t *testing.T) {
 // ---- PKCS#12 reconcile flow ----------------------------------------------
 
 func TestReconcile_PKCS12_NoAnnotation_Locked(t *testing.T) {
-	f := setupEnvtest(t, nil)
+	f := setupEnvtest(t, fixtureOpts{})
 	ctx := context.Background()
 
 	pfx := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx-locked.test"}, "hunter2")
@@ -387,7 +397,7 @@ func TestReconcile_PKCS12_NoAnnotation_Locked(t *testing.T) {
 }
 
 func TestReconcile_PKCS12_AnnotationFlow(t *testing.T) {
-	f := setupEnvtest(t, nil)
+	f := setupEnvtest(t, fixtureOpts{})
 	ctx := context.Background()
 
 	pfx := testutil.NewPKCS12(t, testutil.CertOptions{CommonName: "pfx-flow.test", DNSNames: []string{"pfx-flow.test"}}, "hunter2")
@@ -472,7 +482,7 @@ func TestReconcile_PKCS12_AnnotationFlow(t *testing.T) {
 }
 
 func TestReconcile_MixedFormatsSecret(t *testing.T) {
-	f := setupEnvtest(t, nil)
+	f := setupEnvtest(t, fixtureOpts{})
 	ctx := context.Background()
 
 	pemLeaf := testutil.NewCert(t, testutil.CertOptions{CommonName: "pem-side.test"})
@@ -500,4 +510,109 @@ func TestReconcile_MixedFormatsSecret(t *testing.T) {
 	eventually(t, func() bool {
 		return metricCount(f.gather(t), "dne_certificate_info", f.namespace, "mixed") == 3
 	})
+}
+
+// ---- cert-manager skip flow ---------------------------------------------
+
+func TestReconcile_SkipCertManager_Off(t *testing.T) {
+	f := setupEnvtest(t, fixtureOpts{}) // skip off
+	ctx := context.Background()
+
+	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"cm.test"}})
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: f.namespace, Name: "cm-secret",
+			Annotations: map[string]string{
+				"cert-manager.io/certificate-name": "demo",
+			},
+		},
+		Data: map[string][]byte{"tls.crt": leaf.PEM},
+	}
+	if err := f.client.Create(ctx, sec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	eventually(t, func() bool {
+		return metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "cm-secret")
+	})
+}
+
+func TestReconcile_SkipCertManager_On(t *testing.T) {
+	f := setupEnvtest(t, fixtureOpts{SkipCertManager: true})
+	ctx := context.Background()
+
+	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"cm.test"}})
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: f.namespace, Name: "cm-secret",
+			Annotations: map[string]string{
+				"cert-manager.io/certificate-name": "demo",
+			},
+		},
+		Data: map[string][]byte{"tls.crt": leaf.PEM},
+	}
+	if err := f.client.Create(ctx, sec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Give the reconciler a chance to run, then assert no certs and a skipped tick.
+	eventually(t, func() bool {
+		return reconcileResultCount(f.gather(t), "skipped") >= 1
+	})
+	if metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "cm-secret") {
+		t.Errorf("cert-manager-owned secret should not produce cert metrics when --skip-cert-manager is on")
+	}
+}
+
+func TestReconcile_SkipCertManager_CleanupOnAnnotate(t *testing.T) {
+	f := setupEnvtest(t, fixtureOpts{SkipCertManager: true})
+	ctx := context.Background()
+
+	leaf := testutil.NewCert(t, testutil.CertOptions{DNSNames: []string{"cm.test"}})
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.namespace, Name: "later-cm"},
+		Data:       map[string][]byte{"tls.crt": leaf.PEM},
+	}
+	if err := f.client.Create(ctx, sec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	eventually(t, func() bool {
+		return metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "later-cm")
+	})
+
+	// Operator later marks it as cert-manager-managed (e.g. they migrated
+	// the cert under cert-manager's control). Next reconcile should clear
+	// the previously-emitted series via DropSecret.
+	current := &corev1.Secret{}
+	if err := f.client.Get(ctx, types.NamespacedName{Namespace: f.namespace, Name: "later-cm"}, current); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if current.Annotations == nil {
+		current.Annotations = map[string]string{}
+	}
+	current.Annotations["cert-manager.io/certificate-name"] = "demo"
+	if err := f.client.Update(ctx, current); err != nil {
+		t.Fatalf("update with annotation: %v", err)
+	}
+	eventually(t, func() bool {
+		return !metricExists(f.gather(t), "dne_certificate_not_after_seconds", f.namespace, "later-cm")
+	})
+}
+
+// reconcileResultCount sums the value of dne_reconcile_total for the
+// given result label.
+func reconcileResultCount(mf []*dto.MetricFamily, result string) int {
+	for _, f := range mf {
+		if f.GetName() != "dne_reconcile_total" {
+			continue
+		}
+		total := 0
+		for _, m := range f.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "result" && l.GetValue() == result {
+					total += int(m.GetCounter().GetValue())
+				}
+			}
+		}
+		return total
+	}
+	return 0
 }

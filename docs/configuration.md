@@ -8,6 +8,7 @@ dne is configured via command-line flags. The Helm chart maps `values.yaml` sett
 |---------------------------------|--------------------------|----------------------|----------------------------------------------------------------------------------------------------|
 | `--namespaces`                  | `namespaces`             | (empty)              | Comma-separated namespace list. Empty = cluster-wide. Applied at the watch layer.                  |
 | `--label-selector`              | `labelSelector`          | (empty)              | Standard k8s label selector. Empty = no filter.                                                    |
+| `--skip-cert-manager`           | `skipCertManager`        | `false`              | Ignore Secrets bearing the `cert-manager.io/certificate-name` annotation. See "cert-manager interop" below. |
 | `--metrics-bind-address`        | `metricsPort` (port)     | `:8080`              | Address for `/metrics`. Set to `:0` to disable.                                                    |
 | `--health-probe-bind-address`   | `healthPort` (port)      | `:8081`              | Address for `/healthz` and `/readyz`.                                                              |
 | `--leader-elect`                | `leaderElection.enabled` | `false`              | Enable leader election. Required if you run more than one replica.                                  |
@@ -106,13 +107,14 @@ After this annotation is added, dne emits the usual `dne_certificate_*` series f
 
 ### Detection order
 
-For every value in a Secret, dne tries three formats in sequence and stops at the first that produces certs:
+For every value in a Secret, dne tries four formats in sequence and stops at the first that produces certs:
 
 1. **PEM** — the canonical `-----BEGIN CERTIFICATE-----` blocks.
 2. **Raw DER** — bare X.509 DER bytes with no envelope (rare, but handled).
-3. **PKCS#12** — only attempted when the bytes look plausible (ASN.1 SEQUENCE long-form prefix `0x30 0x82 ...`). Uses the password from the annotation map for that data key; falls back to the empty password if no mapping is configured (covers unencrypted bundles).
+3. **PKCS#12** — only attempted when the bytes start with `0x30 0x82` (ASN.1 SEQUENCE long-form prefix). Uses the password from the annotation map for that data key; falls back to the empty password if no mapping is configured (covers unencrypted bundles).
+4. **JKS / JCEKS** — only attempted when the bytes start with `0xFE 0xED 0xFE 0xED` (JKS) or `0xCE 0xCE 0xCE 0xCE` (JCEKS). Uses the **same** annotation as PKCS#12 — the annotation name is historical, the lookup is format-agnostic. Useful for older Java workloads that haven't migrated to PKCS#12.
 
-Values that match none of the three are silently skipped — they're not certs and don't generate noise.
+Values that match none of the four are silently skipped — they're not certs and don't generate noise.
 
 ### When dne can't open a PKCS#12
 
@@ -126,6 +128,27 @@ The bundled `DNESecretLocked` alert (in `deploy/prometheus/dne-rules.yaml`) fire
 
 ### Caveats
 
-- Cross-Secret password references aren't supported in v0.2 — the password must live in the same Secret as the encrypted bundle.
+- Cross-Secret password references aren't supported — the password must live in the same Secret as the encrypted bundle.
 - The password value is treated as plain text; trailing `\r\n\t ` is trimmed (a common artefact when password files are loaded via `--from-file`).
 - If the annotation lists a data key that doesn't exist in the Secret, that entry is ignored. The encrypted value still gets the empty-password attempt and is reported as `pkcs12_no_password` if that fails.
+- The `reason` label on `dne_secret_locked_total` is prefixed `pkcs12_*` for historical reasons but applies to any keystore format including JKS.
+
+## cert-manager interop
+
+The `--skip-cert-manager` flag (Helm value `skipCertManager`) tells dne to ignore any Secret bearing the `cert-manager.io/certificate-name` annotation. cert-manager applies this annotation to every Secret it manages, so the filter cleanly separates "certs cert-manager handles" from "everything else."
+
+```bash
+helm upgrade dne dne/dne --reuse-values --set skipCertManager=true
+```
+
+Behaviour:
+
+- **Off (default)**: every Secret is tracked, whether cert-manager owns it or not. dne acts as an unconditional observer — useful as a backstop if you don't fully trust cert-manager's renewal pipeline.
+- **On**: cert-manager-owned Secrets are skipped at reconcile time. If dne previously emitted series for one of them (e.g. you turned the flag on after running for a while), those series are cleared via the existing `Tracker.DropSecret` path on the next reconcile of that Secret.
+
+The skipped reconciles are counted in `dne_reconcile_total{result="skipped"}`, so you can verify the filter is firing as expected.
+
+Limitations:
+
+- Only the standard cert-manager annotation is checked. Other certificate managers (e.g. Trust Manager's `trust.cert-manager.io/*` annotations on trust bundles, or any custom tooling) are not auto-detected.
+- The filter is all-or-nothing per Secret. There's no way to say "track cert-manager Secrets but only alert on the ones in `prod`" — use the existing `--label-selector` for that kind of scoping instead.

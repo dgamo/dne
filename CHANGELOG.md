@@ -4,6 +4,17 @@ All notable changes to dne are documented here. The format is based on [Keep a C
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-24
+
+### Added
+- JKS / JCEKS Java KeyStore detection. Reuses the existing `dne.k8s.io/pkcs12-passwords` annotation for password lookup — operators don't need to know the format, the cascade dispatches on magic bytes.
+- `--skip-cert-manager` flag (Helm value `skipCertManager`, default `false`). When on, Secrets bearing `cert-manager.io/certificate-name` are filtered out and any previously-emitted series are cleared via `Tracker.DropSecret` on the next reconcile.
+- New `dne_reconcile_total{result="skipped"}` label value, incremented every time the cert-manager filter drops a Secret.
+- `internal/testutil`: `NewJKS`, `NewJKSChain`, `NewJKSTruststore` helpers built on `github.com/pavlo-v-chernykh/keystore-go/v4`.
+
+### Changed
+- Detection cascade is now four steps: PEM → DER → PKCS#12 → JKS. Existing values that already match earlier steps are unaffected.
+
 ## [0.2.1] — 2026-05-24
 
 ### Fixed

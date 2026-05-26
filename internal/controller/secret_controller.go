@@ -21,13 +21,19 @@ import (
 	"github.com/dgamo/dne/internal/metrics"
 )
 
+// CertManagerAnnotation is the standard annotation cert-manager places
+// on Secrets it manages. When SkipCertManager is enabled, dne treats
+// any Secret carrying this annotation as out-of-scope.
+const CertManagerAnnotation = "cert-manager.io/certificate-name"
+
 // SecretReconciler reconciles a Secret object: it never mutates the
 // Secret, only mirrors its certificate contents into Prometheus
 // metrics via Tracker.
 type SecretReconciler struct {
-	Client  client.Client
-	Tracker *metrics.Tracker
-	Metrics *metrics.Recorder
+	Client          client.Client
+	Tracker         *metrics.Tracker
+	Metrics         *metrics.Recorder
+	SkipCertManager bool
 }
 
 // Reconcile implements reconcile.Reconciler.
@@ -44,6 +50,18 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 		}
 		r.Metrics.Reconciles.WithLabelValues(metrics.ReconcileError).Inc()
 		return reconcile.Result{}, err
+	}
+
+	if r.SkipCertManager {
+		if _, owned := sec.Annotations[CertManagerAnnotation]; owned {
+			// Treat cert-manager-owned Secrets as out-of-scope. Drop
+			// any previously-emitted series so the operator sees the
+			// effect on the next reconcile after they flip the flag.
+			r.Tracker.DropSecret(req.NamespacedName)
+			r.Metrics.Reconciles.WithLabelValues(metrics.ReconcileSkipped).Inc()
+			logger.V(1).Info("skipping cert-manager-owned secret")
+			return reconcile.Result{}, nil
+		}
 	}
 
 	opts := cert.ParseOptions{PKCS12Passwords: resolvePKCS12Passwords(&sec)}

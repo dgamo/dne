@@ -24,6 +24,7 @@ type Config struct {
 	LeaderElection     bool
 	LeaderElectionID   string
 	LogLevel           string
+	SkipCertManager    bool
 }
 
 // Defaults returns a Config populated with conservative defaults that
@@ -51,6 +52,7 @@ func (c *Config) Register(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.LeaderElection, "leader-elect", c.LeaderElection, "Enable leader election. Only useful when running multiple replicas.")
 	fs.StringVar(&c.LeaderElectionID, "leader-election-id", c.LeaderElectionID, "Lease object name used for leader election.")
 	fs.StringVar(&c.LogLevel, "log-level", c.LogLevel, "Log level (debug, info, warn, error).")
+	fs.BoolVar(&c.SkipCertManager, "skip-cert-manager", c.SkipCertManager, "Ignore Secrets that carry the 'cert-manager.io/certificate-name' annotation. Useful when cert-manager already handles rotation visibility for those certs.")
 }
 
 // Validate normalises and checks the parsed config. Call it after

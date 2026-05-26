@@ -20,6 +20,7 @@
       "items": {"type": "string"}
     },
     "labelSelector": {"type": "string"},
+    "skipCertManager": {"type": "boolean"},
     "leaderElection": {
       "type": "object",
       "properties": {

@@ -43,7 +43,11 @@ Increments when a value contained a `BEGIN CERTIFICATE` block but the DER conten
 ## `dne_reconcile_total`
 
 - **Type**: counter
-- **Labels**: `result` — one of `success`, `error`, `notfound`.
+- **Labels**: `result` — one of `success`, `error`, `notfound`, `skipped`.
+  - `success` — secret reconciled, metrics emitted (or cleared).
+  - `error` — fetch from the API server failed.
+  - `notfound` — secret deleted; metric series cleaned up.
+  - `skipped` — `--skip-cert-manager` is on and the secret carries `cert-manager.io/certificate-name`. See `docs/configuration.md#cert-manager-interop`.
 
 Useful as a smoke test (`rate(dne_reconcile_total{result="success"}[5m])`) and to alert on rising error rates.
 
